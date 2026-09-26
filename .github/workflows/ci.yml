@@ -1,0 +1,69 @@
+name: PAG CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pag-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+
+      - name: Show runtime
+        run: node --version
+
+      - name: Syntax-check JavaScript
+        shell: bash
+        run: |
+          find bin src tests examples public -type f -name '*.js' -print0 |
+            xargs -0 -n1 node --check
+
+      - name: Validate shell entrypoint
+        run: bash -n docker-entrypoint.sh
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Fresh-install smoke test
+        shell: bash
+        run: |
+          export PAG_DATA_DIR="$(mktemp -d)"
+          node ./bin/pag.js init
+          node ./bin/pag.js audit verify
+
+          node ./bin/pag.js serve > /tmp/pag-server.log 2>&1 &
+          PAG_PID=$!
+          trap 'kill "$PAG_PID" 2>/dev/null || true' EXIT
+
+          for attempt in {1..20}; do
+            if curl --fail --silent --show-error http://127.0.0.1:8787/health > /tmp/pag-health.json; then
+              cat /tmp/pag-health.json
+              exit 0
+            fi
+            sleep 0.5
+          done
+
+          cat /tmp/pag-server.log
+          exit 1
