@@ -1,0 +1,403 @@
+openapi: 3.1.0
+info:
+  title: Personal Access Gateway API
+  version: 1.0.0
+  description: Local-first capability gateway for agents, human approvals, and least-privilege control channels.
+servers:
+  - url: http://127.0.0.1:8787
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200': { description: Healthy }
+  /auth/login:
+    post:
+      summary: Start an administrator browser session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, writeOnly: true }
+      responses:
+        '200': { description: Session cookie issued }
+        '401': { description: Invalid administrator token }
+  /auth/logout:
+    post:
+      summary: Clear the administrator browser session
+      responses: { '200': { description: Logged out } }
+  /auth/me:
+    get:
+      summary: Check administrator browser-session state
+      responses: { '200': { description: Authentication state } }
+  /v1/intents:
+    post:
+      summary: Submit an actor intent
+      security: [{ actorBearer: [] }]
+      parameters:
+        - in: header
+          name: X-PAG-Idempotency-Key
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [capability]
+              properties:
+                capability: { type: string, examples: [x.threads.create] }
+                args: { type: object, additionalProperties: true }
+                idempotencyKey: { type: string }
+      responses:
+        '201': { description: Intent recorded }
+        '401': { description: Invalid actor token }
+        '409': { description: Idempotency or connector conflict }
+  /v1/intents/{id}:
+    get:
+      summary: Get an actor-owned intent, or any intent for an administrator session
+      security: [{ actorBearer: [] }, { adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Intent }
+        '403': { description: Intent belongs to another actor }
+        '404': { description: Not found }
+  /v1/control/approvals:
+    get:
+      summary: List approvals through a least-privilege control actor
+      security: [{ controlBearer: [] }]
+      parameters:
+        - in: query
+          name: state
+          schema: { type: string, default: pending }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100 }
+      responses:
+        '200': { description: Approval records }
+        '401': { description: A control actor token is required }
+  /v1/control/approvals/{id}/approve:
+    post:
+      summary: Approve the exact reviewed payload through a control actor
+      security: [{ controlBearer: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedArgsHash]
+              properties:
+                expectedArgsHash: { type: string }
+                note: { type: string }
+      responses:
+        '200': { description: Approved intent and execution result }
+        '401': { description: A control actor token is required }
+        '409': { description: State or payload-hash conflict }
+  /v1/control/approvals/{id}/deny:
+    post:
+      summary: Deny a pending approval through a control actor
+      security: [{ controlBearer: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string }
+      responses:
+        '200': { description: Denied intent }
+        '401': { description: A control actor token is required }
+  /v1/admin/summary:
+    get:
+      summary: Control Center summary
+      security: [{ adminCookie: [] }]
+      responses: { '200': { description: Summary } }
+  /v1/admin/lockdown:
+    get:
+      summary: Read emergency lockdown state
+      security: [{ adminCookie: [] }]
+      responses: { '200': { description: Lockdown state } }
+    post:
+      summary: Enable or disable emergency lockdown
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses: { '200': { description: Updated lockdown state } }
+  /v1/admin/intents:
+    get:
+      summary: List intent details for the Control Center
+      security: [{ adminCookie: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100 }
+      responses: { '200': { description: Intent details } }
+  /v1/actors:
+    get:
+      summary: List actors
+      security: [{ adminCookie: [] }]
+      responses: { '200': { description: Actors } }
+    post:
+      summary: Create an actor; plaintext token is returned once
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                kind: { type: string, enum: [agent, control], default: agent }
+      responses: { '201': { description: Actor and one-time token } }
+  /v1/actors/{id}/rotate-token:
+    post:
+      summary: Rotate an actor token; plaintext replacement token is returned once
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      responses: { '200': { description: Actor and replacement token } }
+  /v1/actors/{id}/status:
+    post:
+      summary: Revoke or reactivate an actor
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, revoked] }
+      responses: { '200': { description: Updated actor } }
+  /v1/grants:
+    get:
+      summary: List grants
+      security: [{ adminCookie: [] }]
+      parameters:
+        - in: query
+          name: actorId
+          schema: { type: string }
+      responses: { '200': { description: Grants } }
+    post:
+      summary: Create a grant
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorId, capability, effect]
+              properties:
+                actorId: { type: string }
+                capability: { type: string }
+                effect: { type: string, enum: [allow, ask, deny] }
+                priority: { type: integer, default: 0 }
+                conditions: { type: object, additionalProperties: true }
+                expiresAt: { type: [string, 'null'], format: date-time }
+      responses: { '201': { description: Grant } }
+  /v1/grants/{id}:
+    delete:
+      summary: Revoke a grant
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      responses: { '200': { description: Revocation result } }
+  /v1/connectors:
+    get:
+      summary: List registered capabilities/connectors
+      security: [{ adminCookie: [] }]
+      responses: { '200': { description: Connectors } }
+  /v1/connections:
+    get:
+      summary: List non-secret connection metadata
+      security: [{ adminCookie: [] }]
+      responses: { '200': { description: Connections } }
+    post:
+      summary: Create connection metadata with optional vault reference
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, connector]
+              properties:
+                name: { type: string }
+                connector: { type: string }
+                accountLabel: { type: [string, 'null'] }
+                vaultRef: { type: [string, 'null'] }
+                metadata: { type: object, additionalProperties: true }
+      responses: { '201': { description: Connection metadata } }
+  /v1/connections/{id}/status:
+    post:
+      summary: Enable or disable a connection
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, disabled] }
+      responses: { '200': { description: Updated connection } }
+  /v1/connections/{id}:
+    delete:
+      summary: Delete connection metadata
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      responses: { '200': { description: Deletion result } }
+  /v1/approvals:
+    get:
+      summary: List approvals
+      security: [{ adminCookie: [] }]
+      parameters:
+        - in: query
+          name: state
+          schema: { type: string, default: pending }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100 }
+      responses: { '200': { description: Approvals } }
+  /v1/approvals/{id}/approve:
+    post:
+      summary: Approve exact reviewed payload
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedArgsHash: { type: string }
+                note: { type: string }
+      responses:
+        '200': { description: Approved intent and execution }
+        '409': { description: State or payload-hash conflict }
+  /v1/approvals/{id}/deny:
+    post:
+      summary: Deny pending approval
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string }
+      responses: { '200': { description: Denied intent } }
+  /v1/vault:
+    get:
+      summary: List vault metadata; never returns secret values
+      security: [{ adminCookie: [] }]
+      responses: { '200': { description: Vault metadata } }
+    post:
+      summary: Store or replace an encrypted secret
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, value]
+              properties:
+                name: { type: string }
+                value: { type: string, writeOnly: true }
+                connector: { type: [string, 'null'] }
+                metadata: { type: object, additionalProperties: true }
+      responses: { '201': { description: Secret metadata only } }
+  /v1/vault/{name}:
+    delete:
+      summary: Delete a vault entry by name
+      security: [{ adminCookie: [] }]
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/Csrf'
+      responses: { '200': { description: Deletion result } }
+  /v1/audit:
+    get:
+      summary: Read audit events and chain verification result
+      security: [{ adminCookie: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 200 }
+      responses: { '200': { description: Audit data } }
+components:
+  parameters:
+    Id:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+    Csrf:
+      in: header
+      name: X-PAG-CSRF
+      required: true
+      schema: { type: string, const: '1' }
+  securitySchemes:
+    actorBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: PAG actor token
+    controlBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: PAG control actor token
+    adminCookie:
+      type: apiKey
+      in: cookie
+      name: pag_session

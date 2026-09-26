@@ -1,0 +1,25 @@
+{
+  "examples": [
+    {
+      "actor": "BIPAI",
+      "capability": "x.threads.create",
+      "effect": "ask",
+      "priority": 10,
+      "conditions": { "maxLength": { "text": 25000 } }
+    },
+    {
+      "actor": "BIPAI",
+      "capability": "linkedin.posts.create",
+      "effect": "ask",
+      "priority": 10,
+      "conditions": {}
+    },
+    {
+      "actor": "Test Agent",
+      "capability": "noop.test",
+      "effect": "allow",
+      "priority": 1,
+      "conditions": {}
+    }
+  ]
+}

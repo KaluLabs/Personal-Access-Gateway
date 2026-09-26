@@ -1,0 +1,7 @@
+.pag/
+node_modules/
+.env
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.DS_Store

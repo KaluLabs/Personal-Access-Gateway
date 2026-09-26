@@ -1,0 +1,14 @@
+{
+  "name": "personal-access-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A deny-first, approval-gated gateway for agent actions.",
+  "bin": { "pag": "./bin/pag.js" },
+  "engines": { "node": ">=22.5.0" },
+  "scripts": {
+    "start": "node ./bin/pag.js serve",
+    "test": "node --test",
+    "doctor": "node ./bin/pag.js doctor"
+  }
+}
