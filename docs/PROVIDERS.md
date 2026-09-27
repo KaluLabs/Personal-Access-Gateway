@@ -56,16 +56,24 @@ registry.register('example.items.create', {
 
 ## Authentication adapters
 
-PAG v1.1 ships browser-backed manifests for X, LinkedIn, and Instagram. The manifest format is intentionally ready for `oauth`, `api_key`, or local-session adapters, but v1.1 does not pretend that a provider OAuth flow exists where one has not been implemented.
+PAG v1.2 supports two authentication families:
 
-A future OAuth adapter should:
+- `browser`: X, LinkedIn, and Instagram continue to use the authenticated-browser model.
+- `oauth`: GitHub and Google use the authorization-code flow with state + S256 PKCE.
 
-1. Generate state/PKCE and redirect the human to the provider.
-2. Exchange the callback only inside PAG.
-3. Encrypt refresh/access credentials in the PAG vault.
-4. Store only non-secret account metadata on the connection row.
-5. Revoke provider credentials on disconnect when the provider supports revocation.
-6. Require reauthorization when newly requested scopes cannot be granted locally.
+The generic OAuth adapter:
+
+1. Generates random state and a PKCE verifier.
+2. Stores only a hash of state and encrypts the verifier before persistence.
+3. Exchanges the callback code only inside PAG.
+4. Encrypts access/refresh tokens in the PAG vault.
+5. Stores only non-secret account metadata on the connection row.
+6. Refreshes expiring access tokens inside the gateway when a refresh token is available.
+7. Requires provider reauthorization before an OAuth scope elevation becomes active.
+
+See `docs/OAUTH.md` for deployment configuration and callback URLs.
+
+Provider-specific remote token revocation is intentionally separate from local disconnect/delete semantics in v1.2. Disconnect immediately prevents PAG use; deleting the local credential removes PAG's encrypted copy.
 
 ## Open-source contribution rule
 
