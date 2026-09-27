@@ -83,13 +83,13 @@ export class PagService {
     const scopes=parseJson(r.scopes_json,[]);
     return {...r,scopes,metadata:parseJson(r.metadata_json,{}),provider:provider?{id:provider.id,name:provider.name}:null,lifecycle:r.disconnected_at?'disconnected':r.status};
   }
-  createConnection({name,connector,accountLabel=null,vaultRef=null,metadata={},authMethod=null,scopes=null,externalAccountId=null}) {
+  createConnection({name,connector,accountLabel=null,vaultRef=null,metadata={},authMethod=null,scopes=null,externalAccountId=null,oauthVerified=false}) {
     if(!name?.trim()||!connector?.trim()) throw appError('Connection name and connector are required.');
     if(vaultRef && !this.vault.metadata(vaultRef)) throw appError('Referenced vault entry does not exist.',404);
     let method,normalizedScopes;
     try { method=validateAuthMethod(connector.trim(),authMethod); normalizedScopes=normalizeScopes(connector.trim(),scopes); }
     catch(e){ throw appError(e.message); }
-    if(method==='oauth' && !vaultRef) throw appError('OAuth connections must be created through the provider authorization flow.',409);
+    if(method==='oauth' && !oauthVerified) throw appError('OAuth connections must be created through the provider authorization flow.',409);
     const id=randomId('con_'); const now=nowIso();
     this.db.prepare(`INSERT INTO connections(id,name,connector,account_label,vault_ref,status,metadata_json,created_at,updated_at,auth_method,scopes_json,external_account_id,health_status,last_checked_at,disconnected_at) VALUES(?,?,?,?,?,'active',?,?,?,?,?,?,? ,NULL,NULL)`)
       .run(id,name.trim(),connector.trim(),accountLabel,vaultRef,json(metadata||{}),now,now,method,json(normalizedScopes),externalAccountId,'unknown');
@@ -152,6 +152,7 @@ export class PagService {
   }
   reconnectConnection(id,{vaultRef=undefined,accountLabel=undefined,scopes=undefined,authMethod=undefined}={}) {
     const c=this.getConnection(id); if(!c) throw appError('Connection not found.',404);
+    if(c.auth_method==='oauth' || authMethod==='oauth') throw appError('OAuth connections must be reauthorized through the provider authorization flow.',409);
     const nextVault=vaultRef===undefined?c.vault_ref:vaultRef||null; if(nextVault && !this.vault.metadata(nextVault)) throw appError('Referenced vault entry does not exist.',404);
     let nextScopes=c.scopes,nextAuth=c.auth_method;
     try{if(scopes!==undefined)nextScopes=normalizeScopes(c.connector,scopes);if(authMethod!==undefined)nextAuth=validateAuthMethod(c.connector,authMethod);}catch(e){throw appError(e.message);}
@@ -182,7 +183,7 @@ export class PagService {
         this.audit.append('local-admin','connection.oauth_reauthorized',current.id,{provider:providerId,externalAccountId:completed.account.externalAccountId,scopes:completed.logicalScopes});
         return {connection:this.checkConnectionHealth(current.id),reauthorized:true};
       }
-      const connection=this.createConnection({name:`${provider.name} — ${completed.account.accountLabel}`,connector:providerId,accountLabel:completed.account.accountLabel,vaultRef:completed.vaultRef,metadata:{...(completed.account.metadata||{}),oauth:true},authMethod:'oauth',scopes:completed.logicalScopes,externalAccountId:completed.account.externalAccountId});
+      const connection=this.createConnection({name:`${provider.name} — ${completed.account.accountLabel}`,connector:providerId,accountLabel:completed.account.accountLabel,vaultRef:completed.vaultRef,metadata:{...(completed.account.metadata||{}),oauth:true},authMethod:'oauth',scopes:completed.logicalScopes,externalAccountId:completed.account.externalAccountId,oauthVerified:true});
       this.audit.append('local-admin','connection.oauth_connected',connection.id,{provider:providerId,externalAccountId:completed.account.externalAccountId,scopes:completed.logicalScopes});
       return {connection,reauthorized:false};
     }catch(e){this.vault.delete(completed.vaultRef);throw e;}
