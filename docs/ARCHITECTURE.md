@@ -129,3 +129,45 @@ connector executor
 ```
 
 The `connection_access` table is authoritative for account-bound actions. The provider manifest maps human-readable scopes and access levels to capability modes, while `ConnectorRegistry` owns execution. This keeps the UI understandable and the runtime deny-first.
+
+
+## v1.2 provider authentication boundary
+
+OAuth provider authentication stays inside the PAG trust boundary:
+
+```text
+Control Center
+   |
+   | authenticated admin + CSRF
+   v
+OAuth start
+   |
+   +--> random state (only SHA-256 hash persisted)
+   +--> PKCE verifier (AES-256-GCM encrypted)
+   +--> S256 code challenge
+   |
+   v
+Provider consent
+   |
+   v
+/oauth/callback/{provider}
+   |
+   +--> state match + single-use flow claim
+   +--> server-side code/verifier exchange
+   +--> authenticated account identity lookup
+   |
+   v
+Encrypted vault token bundle
+   |
+   v
+Connection metadata
+   |
+   v
+Agent × connection access (defaults to No access)
+```
+
+Provider client secrets are deployment configuration and provider access/refresh tokens remain inside PAG. Connectors obtain an access token only inside the trusted runtime through `OAuthManager`; actors never receive it.
+
+OAuth reauthorization is connection-identity preserving. If an existing connection already has an external account identifier, PAG rejects a callback that resolves to a different provider account. This prevents an account switch from inheriting the original connection's agent-access assignments.
+
+OAuth scope elevation is also fail-closed. A requested added scope remains pending until provider reauthorization completes; local scope removal takes effect immediately.

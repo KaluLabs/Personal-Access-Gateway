@@ -106,6 +106,22 @@ export function openDb(dir) {
       FOREIGN KEY(connection_id) REFERENCES connections(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS connection_access_connection ON connection_access(connection_id, actor_id);
+    CREATE TABLE IF NOT EXISTS oauth_flows (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      connection_id TEXT,
+      state_hash TEXT NOT NULL UNIQUE,
+      verifier_ciphertext TEXT NOT NULL,
+      verifier_iv TEXT NOT NULL,
+      verifier_tag TEXT NOT NULL,
+      requested_scopes_json TEXT NOT NULL DEFAULT '[]',
+      redirect_uri TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending','exchanging')),
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY(connection_id) REFERENCES connections(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS oauth_flows_expiry ON oauth_flows(expires_at);
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value_json TEXT NOT NULL,

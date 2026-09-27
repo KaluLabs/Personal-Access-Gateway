@@ -1,34 +1,52 @@
-# PAG v1.1.0 release notes
+# PAG v1.2.0 release notes
 
-PAG v1.1 turns the v1 security core into an account-access control product.
+PAG v1.2 adds real provider authentication on top of the v1.1 connection/access model.
 
-## Connections
+## OAuth provider authentication
 
-- Provider catalog for X, LinkedIn, and Instagram.
-- Browser-backed account registration with logical account scopes.
-- Connection cards with lifecycle, configuration health, account scopes, and agent usage count.
-- Disable/enable, disconnect/reconnect, and scope elevation/downgrade.
-- Disconnect preserves audit history and can optionally remove an unshared vault credential.
+- Generic OAuth 2.0 authorization-code flow with unguessable state and S256 PKCE.
+- Only a SHA-256 hash of OAuth state is persisted.
+- PKCE verifiers are encrypted with the PAG master key while a flow is pending.
+- Provider access and refresh tokens are encrypted inside the PAG vault.
+- Expiring tokens refresh inside PAG when a refresh token is available.
+- OAuth callbacks are single-use; transient flow state is removed on completion/failure.
 
-## Access management
+## GitHub and Google
 
-- New agent × account access matrix.
-- Levels: No access, Read only, Ask before actions, Automatic, and Custom.
-- Every new or migrated agent/account pair defaults to No access.
-- Account-bound capabilities require an explicit `connectionId`.
-- Provider type and account scope are enforced before authorization.
-- Access is revalidated immediately before execution so stale approvals cannot survive a downgrade or disconnect.
+- GitHub OAuth identity connection requires only `read:user`; PAG also requests `offline_access` so GitHub Apps/OAuth Apps configured for expiring user tokens can issue refresh tokens.
+- Built-in `github.user.read` token-backed capability.
+- Google OAuth/OIDC identity connection using `openid profile email` and offline access.
+- Built-in `google.user.read` token-backed capability.
+- Provider configuration status is visible in the Control Center without exposing client secrets.
 
-## Open source extension surface
+GitHub currently recommends GitHub Apps for fine-grained repository automation, so v1.2 intentionally keeps the OAuth integration identity-focused rather than requesting the broad `repo` scope.
 
-- Added provider manifests separate from connector executors.
-- Added `docs/PROVIDERS.md` with the provider/executor contract and OAuth adapter expectations.
-- Added CLI and HTTP APIs for connection lifecycle, scopes, provider discovery, and access management.
+## Reauthorization and scopes
 
-## Upgrade
+- Existing OAuth connection IDs can be reauthorized without losing audit history or agent-access assignments.
+- OAuth scope elevation does not become active until provider reauthorization succeeds.
+- Local scope downgrades take effect immediately.
+- New OAuth accounts still initialize every agent × account assignment to **No access**.
 
-The SQLite migration from v1.0 is additive. Existing agent × connection pairs are initialized to No access as a deliberate fail-closed migration. See `docs/MIGRATION-v1.0.0.md`.
+## Dashboard and API
+
+- OAuth-aware provider cards in **Connections**.
+- OAuth connect flow from the browser Control Center.
+- OAuth reconnect for disconnected accounts.
+- Reauthorization is automatically triggered when an OAuth scope elevation requires provider consent.
+- New `POST /v1/oauth/{provider}/start` and `GET /oauth/callback/{provider}` routes.
+
+## Deployment
+
+Set provider application credentials through environment variables and register callback URLs matching the PAG instance. For reverse-proxy deployments set `PAG_PUBLIC_BASE_URL` to the exact public HTTPS origin.
+
+See:
+
+- `docs/OAUTH.md`
+- `docs/PROVIDERS.md`
+- `docs/SECURITY.md`
+- `docs/MIGRATION-v1.1.0.md`
 
 ## Verification
 
-The v1.1 regression suite covers the v1 security invariants plus account access defaults, access-level behavior, scope downgrade, disconnect/reconnect, stale-approval invalidation, dashboard APIs, and additive database migration.
+The regression suite covers v1/v1.1 invariants plus PKCE flow creation, state replay rejection, encrypted OAuth token storage, provider identity binding, token-backed profile reads, refresh-token rotation, and the HTTP start/callback flow.

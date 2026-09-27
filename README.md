@@ -1,4 +1,4 @@
-# Personal Access Gateway (PAG) v1.1.0
+# Personal Access Gateway (PAG) v1.2.0
 
 PAG is a local-first authorization boundary between AI agents and real-world account actions. Agents never receive account credentials. They submit **intents** describing the exact capability and arguments they want to use. PAG evaluates a deny-first policy, optionally asks the human for approval, binds that approval to the payload hash, and produces at most one execution receipt.
 
@@ -15,6 +15,8 @@ This repository is the open-source PAG baseline: a local-first security boundary
 - Tamper-evident append-only audit hash chain.
 - AES-256-GCM encrypted local credential vault. Raw values are never returned by HTTP APIs.
 - Provider-aware account connections with scopes, health state, disconnect/reconnect, and preserved audit history.
+- OAuth 2.0 authorization-code authentication with state + S256 PKCE, encrypted transient verifier storage, encrypted provider tokens, and refresh-token rotation.
+- Built-in GitHub and Google OAuth identity connections with token-backed profile-read capabilities.
 - Agent × account access matrix with No access, Read only, Ask, Automatic, and Custom permission levels.
 - Execution-time access revalidation so disconnects and permission downgrades invalidate stale approvals.
 - Browser Control Center for approvals, actors, grants, connections, intents, handoffs, lockdown, vault metadata, and audit verification.
@@ -50,6 +52,30 @@ node ./bin/pag.js serve
 The generated files are permission-restricted where the host OS supports POSIX file modes. Back up the data directory securely. Anyone with `master.key` and the database can decrypt vault values.
 
 Open `http://127.0.0.1:8787` and enter the admin token.
+
+## GitHub and Google OAuth
+
+PAG v1.2 can connect GitHub and Google accounts through real OAuth authorization-code flows with state + PKCE. Configure the provider application credentials before using the **Connections** page:
+
+```bash
+export PAG_OAUTH_GITHUB_CLIENT_ID='...'
+export PAG_OAUTH_GITHUB_CLIENT_SECRET='...'
+export PAG_OAUTH_GOOGLE_CLIENT_ID='...'
+export PAG_OAUTH_GOOGLE_CLIENT_SECRET='...'
+```
+
+For the default local instance, register these provider callback URLs:
+
+```text
+http://127.0.0.1:8787/oauth/callback/github
+http://127.0.0.1:8787/oauth/callback/google
+```
+
+When PAG is behind a reverse proxy, set `PAG_PUBLIC_BASE_URL` to the exact external HTTPS origin. Provider access and refresh tokens are encrypted in the PAG vault and are never returned to agents or the Control Center API.
+
+GitHub OAuth in v1.2 is identity-focused. GitHub currently recommends GitHub Apps for fine-grained repository automation, so PAG does not request the broad `repo` OAuth scope just to claim repository integration.
+
+See `docs/OAUTH.md`.
 
 ## Connections and account access
 
@@ -230,11 +256,11 @@ The Control Center can accept a new vault value because it is the human administ
 ## Docker
 
 ```bash
-docker build -t pag:1.1.0 .
+docker build -t pag:1.2.0 .
 docker run --rm -it \
   -p 127.0.0.1:8787:8787 \
   -v pag-data:/data \
-  pag:1.1.0
+  pag:1.2.0
 ```
 
 The entrypoint initializes `/data` on first run, then starts PAG. Preserve the volume.
@@ -245,7 +271,7 @@ The entrypoint initializes `/data` on first run, then starts PAG. Preserve the v
 npm test
 ```
 
-The suite covers the v1 security invariants plus account-access defaults, read/ask/automatic/custom levels, scope downgrades, disconnect/reconnect, stale-approval invalidation, dashboard APIs, and additive database migration.
+The suite covers the v1 security invariants plus account-access defaults, read/ask/automatic/custom levels, scope downgrades, disconnect/reconnect, stale-approval invalidation, OAuth PKCE/state handling, encrypted provider tokens, token refresh, OAuth callback routing, dashboard APIs, and additive database migration.
 
 ## API contract
 
@@ -263,6 +289,9 @@ Read `docs/ARCHITECTURE.md` for trust boundaries and lifecycle details.
 
 The previous local implementation used an earlier schema. Because this repository does not have the exact v0.3.1 database DDL, v1 does not attempt a destructive automatic migration. Keep the old database untouched, initialize a new v1 data directory, recreate actors/grants, and import only data whose old columns are verified. See `docs/MIGRATION-v0.3.1.md`.
 
-## Upgrading from v1.0.0
+## Upgrading
 
-See `docs/MIGRATION-v1.0.0.md`. The migration is additive, but existing agent × connection pairs intentionally start at **No access** and must be explicitly re-enabled.
+- From v1.0.0: see `docs/MIGRATION-v1.0.0.md`.
+- From v1.1.0: see `docs/MIGRATION-v1.1.0.md`.
+
+The v1.2 migration is additive. Existing browser-backed connections remain unchanged; GitHub and Google OAuth connections are created only through explicit provider authorization.

@@ -41,5 +41,7 @@ export function runtimeConfig(dir=dataDir()) {
     host: process.env.PAG_HOST || '127.0.0.1',
     port: Number(process.env.PAG_PORT || 8787),
     approvalTtlMinutes: Number(process.env.PAG_APPROVAL_TTL_MINUTES || 30),
+    oauthFlowTtlMinutes: Number(process.env.PAG_OAUTH_FLOW_TTL_MINUTES || 10),
+    publicBaseUrl: process.env.PAG_PUBLIC_BASE_URL || null,
   };
 }
