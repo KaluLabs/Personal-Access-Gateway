@@ -80,7 +80,8 @@ export class OAuthManager {
     if(!redirectUri) throw oauthError('OAuth redirect URI is required.');
     const {provider,clientId}=this._client(providerId);
     const scopes=normalizeScopes(providerId,logicalScopes);
-    const oauthScopes=oauthScopesForProvider(providerId,scopes);
+    const requiredOauthScopes=oauthScopesForProvider(providerId,scopes);
+    const oauthScopes=[...new Set([...requiredOauthScopes,...(provider.oauth.extraScopes||[])])];
     const id=randomId('oaf_');
     const state=randomBytes(32).toString('base64url');
     const verifier=randomBytes(32).toString('base64url');
@@ -159,8 +160,14 @@ export class OAuthManager {
         redirect_uri:flow.redirect_uri,
         code_verifier:verifier,
       });
-      const account=await this._profile(providerId,token.access_token);
       const logicalScopes=parseJson(flow.requested_scopes_json,[]);
+      const requiredOauthScopes=oauthScopesForProvider(providerId,logicalScopes);
+      if(token.scope){
+        const granted=new Set(String(token.scope).split(/[\s,]+/).map(x=>x.trim()).filter(Boolean));
+        const missing=requiredOauthScopes.filter(scope=>!granted.has(scope));
+        if(missing.length) throw oauthError(`${providerId} did not grant required OAuth scope(s): ${missing.join(', ')}.`,409);
+      }
+      const account=await this._profile(providerId,token.access_token);
       const bundle={
         access_token:token.access_token,
         refresh_token:token.refresh_token||null,
