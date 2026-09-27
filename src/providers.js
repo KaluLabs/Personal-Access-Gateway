@@ -58,7 +58,7 @@ const PROVIDERS = [
     ],
     defaultAuthMethod: 'oauth',
     scopes: [
-      { id: 'profile', label: 'Profile', description: 'Read your GitHub profile and verified email addresses.', mode: 'read', oauthScopes: ['read:user','user:email','offline_access'] },
+      { id: 'profile', label: 'Profile', description: 'Read your GitHub profile identity.', mode: 'read', oauthScopes: ['read:user','offline_access'] },
     ],
     defaultScopes: ['profile'],
     capabilities: [
