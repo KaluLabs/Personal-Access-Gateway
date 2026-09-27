@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Personal Access Gateway API
-  version: 1.1.0
-  description: Local-first capability gateway for agents, human approvals, and least-privilege control channels.
+  version: 1.2.0
+  description: Local-first capability gateway for agents, human approvals, least-privilege account access, and OAuth provider authentication.
 servers:
   - url: http://127.0.0.1:8787
 paths:
@@ -34,6 +34,31 @@ paths:
     get:
       summary: Check administrator browser-session state
       responses: { '200': { description: Authentication state } }
+  /oauth/callback/{provider}:
+    get:
+      summary: Complete a provider OAuth authorization-code + PKCE flow
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema: { type: string, enum: [github, google] }
+        - in: query
+          name: state
+          required: true
+          schema: { type: string }
+        - in: query
+          name: code
+          schema: { type: string }
+        - in: query
+          name: error
+          schema: { type: string }
+        - in: query
+          name: error_description
+          schema: { type: string }
+      responses:
+        '200': { description: OAuth connection completed; HTML response }
+        '400': { description: Provider authorization failed }
+        '409': { description: Invalid, expired, or already-consumed OAuth state }
   /v1/intents:
     post:
       summary: Submit an actor intent
@@ -244,6 +269,31 @@ paths:
       summary: List provider manifests, account scopes, capabilities, and human-readable access levels
       security: [{ adminCookie: [] }]
       responses: { '200': { description: Provider catalog } }
+  /v1/oauth/{provider}/start:
+    post:
+      summary: Start an administrator-initiated OAuth authorization-code + PKCE flow
+      security: [{ adminCookie: [] }]
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema: { type: string, enum: [github, google] }
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scopes:
+                  type: array
+                  items: { type: string }
+                connectionId:
+                  type: [string, 'null']
+                  description: Existing connection to reauthorize
+      responses:
+        '201': { description: Authorization URL and short-lived OAuth flow metadata }
+        '409': { description: Provider credentials are not configured or connection mismatch }
   /v1/connections:
     get:
       summary: List non-secret connected-account metadata
