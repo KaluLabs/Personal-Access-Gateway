@@ -34,7 +34,7 @@ export PAG_OAUTH_GITHUB_CLIENT_ID='...'
 export PAG_OAUTH_GITHUB_CLIENT_SECRET='...'
 ```
 
-PAG requests the GitHub profile scopes needed for the built-in `github.user.read` capability and uses PKCE. GitHub currently recommends GitHub Apps for fine-grained repository automation; PAG therefore keeps the initial OAuth integration identity-focused instead of requesting the broad `repo` scope.
+PAG requests the GitHub profile scopes needed for the built-in `github.user.read` capability and uses PKCE. The required identity permission is `read:user`. PAG also requests `offline_access` as an optional flow scope so an app configured for expiring user tokens can issue a refresh token; a valid non-expiring identity token is still accepted when no refresh token is issued. GitHub currently recommends GitHub Apps for fine-grained repository automation; PAG therefore keeps the initial OAuth integration identity-focused instead of requesting the broad `repo` scope.
 
 Official reference:
 
