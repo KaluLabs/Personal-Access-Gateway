@@ -66,4 +66,6 @@ For reverse-proxy deployments, set `PAG_PUBLIC_BASE_URL` to the exact external H
 
 OAuth account consent and PAG agent authorization are independent. Completing OAuth creates or reauthorizes the account connection, but every agent × account assignment remains deny-first and must be explicitly granted.
 
+Reauthorization is identity-locked. Once a connection is bound to a provider account ID, a later OAuth callback resolving to a different account is rejected instead of inheriting the original connection's agent permissions.
+
 Local disconnect immediately blocks use. v1.2 does not claim provider-side remote token revocation; if you need to invalidate a provider token at the provider too, revoke the app/token from that provider's security settings in addition to deleting the PAG credential.
