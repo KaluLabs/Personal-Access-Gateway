@@ -174,6 +174,7 @@ export class PagService {
     try{
       if(completed.connectionId){
         const current=this.getConnection(completed.connectionId); if(!current||current.connector!==providerId) throw appError('OAuth target connection is unavailable.',409);
+        if(current.external_account_id && current.external_account_id!==completed.account.externalAccountId) throw appError('OAuth account identity does not match the existing connection. Create a separate connection for a different account.',409);
         const previousVault=current.vault_ref; const now=nowIso(); const metadata={...(current.metadata||{}),...(completed.account.metadata||{}),oauth:true};
         this.db.prepare(`UPDATE connections SET account_label=?,vault_ref=?,status='active',metadata_json=?,updated_at=?,auth_method='oauth',scopes_json=?,external_account_id=?,health_status='unknown',disconnected_at=NULL WHERE id=?`)
           .run(completed.account.accountLabel,completed.vaultRef,json(metadata),now,json(completed.logicalScopes),completed.account.externalAccountId,current.id);
