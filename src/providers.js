@@ -58,7 +58,7 @@ const PROVIDERS = [
     ],
     defaultAuthMethod: 'oauth',
     scopes: [
-      { id: 'profile', label: 'Profile', description: 'Read your GitHub profile identity.', mode: 'read', oauthScopes: ['read:user','offline_access'] },
+      { id: 'profile', label: 'Profile', description: 'Read your GitHub profile identity.', mode: 'read', oauthScopes: ['read:user'] },
     ],
     defaultScopes: ['profile'],
     capabilities: [
@@ -72,6 +72,7 @@ const PROVIDERS = [
       userInfoUrl: 'https://api.github.com/user',
       tokenHeaders: { Accept: 'application/json' },
       userInfoHeaders: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'PAG' },
+      extraScopes: ['offline_access'],
       profile: { idField: 'id', labelFields: ['login','name'], metadataFields: ['login','name','email','avatar_url','html_url'] },
     },
   },
