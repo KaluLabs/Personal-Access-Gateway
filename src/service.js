@@ -5,6 +5,7 @@ import { PolicyEngine } from './policy.js';
 import { ConnectorRegistry } from './connectors/index.js';
 import { MediaRegistry } from './media.js';
 import { Inspector } from './inspect.js';
+import { OAuthManager } from './oauth.js';
 import { masterKey, runtimeConfig } from './config.js';
 import { ACCESS_LEVELS, getProvider, listProviders, normalizeScopes, providerCapability, validateAuthMethod } from './providers.js';
 import { argsHash, json, nowIso, parseJson, randomId, sha256 } from './util.js';
@@ -17,15 +18,21 @@ function accessView(r) { return r ? {...r,capabilities:parseJson(r.capabilities_
 function sameSet(a,b){return a.length===b.length && a.every(x=>b.includes(x));}
 
 export class PagService {
-  constructor(db, { dir, connectors }={}) {
+  constructor(db, { dir, connectors, fetchImpl=globalThis.fetch }={}) {
     this.db=db; this.cfg=runtimeConfig(dir); this.audit=new AuditLog(db); this.policy=new PolicyEngine(db);
     const key=masterKey(this.cfg.dataDir); this.connectors=connectors || new ConnectorRegistry(); this.vault=new Vault(db,key,this.audit);
+    this.oauth=new OAuthManager(db,key,this.vault,this.audit,{fetchImpl,flowTtlMinutes:this.cfg.oauthFlowTtlMinutes});
     this.media=new MediaRegistry(db,key,{dir:this.cfg.dataDir,audit:this.audit}); this.inspector=new Inspector({mediaRegistry:this.media,audit:this.audit});
     if(!this.connectors.get('instagram.media.inspect')) this.connectors.register('instagram.media.inspect',{name:'opencli-instagram-read',connectionType:'instagram',execute:async({args})=>{if(typeof args.url!=='string')throw appError('url is required.');return this.inspector.inspect(args.url);}});
     if(!this.connectors.get('x.posts.inspect')) this.connectors.register('x.posts.inspect',{name:'opencli-x-read',connectionType:'x',execute:async({args})=>{if(typeof args.url!=='string')throw appError('url is required.');return this.inspector.inspect(args.url);}});
+    if(!this.connectors.get('github.user.read')) this.connectors.register('github.user.read',{name:'github-oauth-user',connectionType:'github',execute:async({connection})=>this.oauth.fetchUserInfo(connection)});
+    if(!this.connectors.get('google.user.read')) this.connectors.register('google.user.read',{name:'google-oauth-user',connectionType:'google',execute:async({connection})=>this.oauth.fetchUserInfo(connection)});
   }
 
-  listProviders() { return { providers:listProviders(), accessLevels:ACCESS_LEVELS }; }
+  listProviders() {
+    const providers=listProviders().map(provider=>({...provider,oauthStatus:provider.oauth?this.oauth.configuration(provider.id):null}));
+    return { providers, accessLevels:ACCESS_LEVELS };
+  }
 
   createActor(name, kind='agent') {
     if (!name?.trim()) throw appError('Actor name is required.');
@@ -82,6 +89,7 @@ export class PagService {
     let method,normalizedScopes;
     try { method=validateAuthMethod(connector.trim(),authMethod); normalizedScopes=normalizeScopes(connector.trim(),scopes); }
     catch(e){ throw appError(e.message); }
+    if(method==='oauth' && !vaultRef) throw appError('OAuth connections must be created through the provider authorization flow.',409);
     const id=randomId('con_'); const now=nowIso();
     this.db.prepare(`INSERT INTO connections(id,name,connector,account_label,vault_ref,status,metadata_json,created_at,updated_at,auth_method,scopes_json,external_account_id,health_status,last_checked_at,disconnected_at) VALUES(?,?,?,?,?,'active',?,?,?,?,?,?,? ,NULL,NULL)`)
       .run(id,name.trim(),connector.trim(),accountLabel,vaultRef,json(metadata||{}),now,now,method,json(normalizedScopes),externalAccountId,'unknown');
@@ -114,6 +122,12 @@ export class PagService {
     if(c.disconnected_at){health='disconnected';detail='This account has been disconnected from PAG.';}
     else if(c.status==='disabled'){health='disabled';detail='This connection is disabled.';}
     else if(c.vault_ref && !this.vault.metadata(c.vault_ref)){health='needs_auth';detail='The referenced credential is missing from the vault.';}
+    else if(c.auth_method==='oauth'){
+      const auth=this.oauth.credentialStatus(c);
+      if(!auth.configured){health='needs_auth';detail='OAuth credential is missing or invalid. Reconnect this account.';}
+      else if(auth.expired&&!auth.refreshable){health='needs_auth';detail='OAuth access token expired and cannot be refreshed. Reconnect this account.';}
+      else {health='configured';detail=auth.expired?'OAuth access token is expired but a refresh token is available. PAG will refresh it on use.':'OAuth credential is encrypted and ready. Live provider verification occurs when the connector is used.';}
+    }
     else if(c.auth_method==='browser'){health='configured';detail='Browser-backed connection configured. Live account authentication is verified only when the connector is used.';}
     const now=nowIso(); this.db.prepare('UPDATE connections SET health_status=?,last_checked_at=?,updated_at=? WHERE id=?').run(health,now,now,id);
     this.audit.append('local-admin','connection.health_checked',id,{health,detail});
@@ -141,6 +155,31 @@ export class PagService {
     return this.checkConnectionHealth(id);
   }
   deleteConnection(id) { const r=this.db.prepare('DELETE FROM connections WHERE id=?').run(id); if(r.changes)this.audit.append('local-admin','connection.deleted',id,{}); return r.changes>0; }
+
+  startOAuth(providerId,{scopes=null,connectionId=null,redirectUri}={}) {
+    const provider=getProvider(providerId); if(!provider?.oauth) throw appError('Provider does not support OAuth.',404);
+    if(connectionId){const c=this.getConnection(connectionId);if(!c)throw appError('Connection not found.',404);if(c.connector!==providerId)throw appError('Connection provider does not match OAuth provider.',409);}
+    try{return this.oauth.start(providerId,{logicalScopes:scopes,redirectUri,connectionId});}catch(e){throw appError(e.message,e.statusCode||400);}
+  }
+  async completeOAuth(providerId,{state,code,error=null,errorDescription=null}={}) {
+    let completed;
+    try{completed=await this.oauth.complete(providerId,{state,code,error,errorDescription});}catch(e){throw appError(e.message,e.statusCode||400);}
+    const provider=getProvider(providerId);
+    try{
+      if(completed.connectionId){
+        const current=this.getConnection(completed.connectionId); if(!current||current.connector!==providerId) throw appError('OAuth target connection is unavailable.',409);
+        const previousVault=current.vault_ref; const now=nowIso(); const metadata={...(current.metadata||{}),...(completed.account.metadata||{}),oauth:true};
+        this.db.prepare(`UPDATE connections SET account_label=?,vault_ref=?,status='active',metadata_json=?,updated_at=?,auth_method='oauth',scopes_json=?,external_account_id=?,health_status='unknown',disconnected_at=NULL WHERE id=?`)
+          .run(completed.account.accountLabel,completed.vaultRef,json(metadata),now,json(completed.logicalScopes),completed.account.externalAccountId,current.id);
+        if(previousVault&&previousVault!==completed.vaultRef){const refs=Number(this.db.prepare('SELECT COUNT(*) n FROM connections WHERE vault_ref=?').get(previousVault).n);if(refs===0)this.vault.delete(previousVault);}
+        this.audit.append('local-admin','connection.oauth_reauthorized',current.id,{provider:providerId,externalAccountId:completed.account.externalAccountId,scopes:completed.logicalScopes});
+        return {connection:this.checkConnectionHealth(current.id),reauthorized:true};
+      }
+      const connection=this.createConnection({name:`${provider.name} — ${completed.account.accountLabel}`,connector:providerId,accountLabel:completed.account.accountLabel,vaultRef:completed.vaultRef,metadata:{...(completed.account.metadata||{}),oauth:true},authMethod:'oauth',scopes:completed.logicalScopes,externalAccountId:completed.account.externalAccountId});
+      this.audit.append('local-admin','connection.oauth_connected',connection.id,{provider:providerId,externalAccountId:completed.account.externalAccountId,scopes:completed.logicalScopes});
+      return {connection,reauthorized:false};
+    }catch(e){this.vault.delete(completed.vaultRef);throw e;}
+  }
 
   getConnectionAccess(actorId,connectionId) { return accessView(this.db.prepare('SELECT * FROM connection_access WHERE actor_id=? AND connection_id=?').get(actorId,connectionId)); }
   listConnectionAccess({actorId=null,connectionId=null}={}) {
@@ -279,6 +318,6 @@ export class PagService {
   }
   summary() {
     this.expireApprovals(); const one=(sql)=>Number(this.db.prepare(sql).get().n);
-    return { version:'1.1.0',lockdown:this.isLockdown(),actors:one('SELECT COUNT(*) n FROM actors'),connections:one('SELECT COUNT(*) n FROM connections'),activeConnections:one("SELECT COUNT(*) n FROM connections WHERE status='active' AND disconnected_at IS NULL"),disconnectedConnections:one('SELECT COUNT(*) n FROM connections WHERE disconnected_at IS NOT NULL'),accessAssignments:one("SELECT COUNT(*) n FROM connection_access WHERE level<>'none'"),grants:one('SELECT COUNT(*) n FROM grants'),pendingApprovals:one("SELECT COUNT(*) n FROM approvals WHERE state='pending'"),intents:one('SELECT COUNT(*) n FROM intents'),succeeded:one("SELECT COUNT(*) n FROM intents WHERE status='succeeded'"),failed:one("SELECT COUNT(*) n FROM intents WHERE status='failed'"),audit:this.audit.verify(),connectors:this.connectors.list(),providers:listProviders().map(p=>({id:p.id,name:p.name}))};
+    return { version:'1.2.0',lockdown:this.isLockdown(),actors:one('SELECT COUNT(*) n FROM actors'),connections:one('SELECT COUNT(*) n FROM connections'),activeConnections:one("SELECT COUNT(*) n FROM connections WHERE status='active' AND disconnected_at IS NULL"),disconnectedConnections:one('SELECT COUNT(*) n FROM connections WHERE disconnected_at IS NOT NULL'),accessAssignments:one("SELECT COUNT(*) n FROM connection_access WHERE level<>'none'"),grants:one('SELECT COUNT(*) n FROM grants'),pendingApprovals:one("SELECT COUNT(*) n FROM approvals WHERE state='pending'"),intents:one('SELECT COUNT(*) n FROM intents'),succeeded:one("SELECT COUNT(*) n FROM intents WHERE status='succeeded'"),failed:one("SELECT COUNT(*) n FROM intents WHERE status='failed'"),audit:this.audit.verify(),connectors:this.connectors.list(),providers:listProviders().map(p=>({id:p.id,name:p.name}))};
   }
 }
