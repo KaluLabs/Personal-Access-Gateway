@@ -13,7 +13,7 @@ PAG v1.2 adds real provider authentication on top of the v1.1 connection/access 
 
 ## GitHub and Google
 
-- GitHub OAuth identity connection using `read:user`, `user:email`, and `offline_access`.
+- GitHub OAuth identity connection using `read:user` and `offline_access`.
 - Built-in `github.user.read` token-backed capability.
 - Google OAuth/OIDC identity connection using `openid profile email` and offline access.
 - Built-in `google.user.read` token-backed capability.
