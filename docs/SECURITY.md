@@ -54,3 +54,16 @@ OpenCLI inspection runs inside the user's authenticated browser session. Treat t
 Capabilities tied to a provider account require `connectionId`. PAG evaluates both the connection's logical provider scopes and the agent × connection access record. New pairs default to `none`. The authorization is checked when the intent is created and again immediately before execution, so a disconnect, account-scope downgrade, or agent-access downgrade prevents a stale approval from executing.
 
 Global grants remain available for non-account capabilities. They do not override an explicit connection access decision for an account-bound action.
+
+
+## OAuth authorization (v1.2)
+
+OAuth flows are administrator-initiated and protected by both an unguessable state value and S256 PKCE. PAG stores only the SHA-256 hash of state; the PKCE verifier is encrypted with the PAG master key before it is written to SQLite.
+
+Provider access and refresh tokens are encrypted in the PAG vault and are never returned through the Control Center API, actor API, or audit log. OAuth client secrets are deployment configuration supplied through environment variables.
+
+For reverse-proxy deployments, set `PAG_PUBLIC_BASE_URL` to the exact external HTTPS origin and register matching provider callback URLs. Do not rely on proxy-forwarded headers for OAuth redirect construction.
+
+OAuth account consent and PAG agent authorization are independent. Completing OAuth creates or reauthorizes the account connection, but every agent × account assignment remains deny-first and must be explicitly granted.
+
+Local disconnect immediately blocks use. v1.2 does not claim provider-side remote token revocation; if you need to invalidate a provider token at the provider too, revoke the app/token from that provider's security settings in addition to deleting the PAG credential.
