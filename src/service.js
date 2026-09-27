@@ -111,10 +111,16 @@ export class PagService {
     let next; try{next=normalizeScopes(c.connector,scopes);}catch(e){throw appError(e.message);}
     const previous=c.scopes||[]; if(sameSet(previous,next)) return {connection:c,added:[],removed:[],reauthorizationRequired:false};
     const added=next.filter(x=>!previous.includes(x)); const removed=previous.filter(x=>!next.includes(x)); const now=nowIso();
-    this.db.prepare('UPDATE connections SET scopes_json=?,updated_at=? WHERE id=?').run(json(next),now,id);
     const provider=getProvider(c.connector); const reauthorizationRequired=added.length>0 && c.auth_method==='oauth';
-    this.audit.append('local-admin',added.length&&removed.length?'connection.scopes_changed':added.length?'connection.scope_elevated':'connection.scope_downgraded',id,{previous,next,added,removed,reauthorizationRequired});
-    return {connection:this.getConnection(id),added,removed,reauthorizationRequired,provider:provider?.name||c.connector};
+    if(reauthorizationRequired){
+      const safeScopes=previous.filter(x=>next.includes(x));
+      if(!sameSet(previous,safeScopes)) this.db.prepare('UPDATE connections SET scopes_json=?,updated_at=? WHERE id=?').run(json(safeScopes),now,id);
+      this.audit.append('local-admin','connection.scope_elevation_requested',id,{previous,pending:next,active:safeScopes,added,removed,reauthorizationRequired:true});
+      return {connection:this.getConnection(id),added,removed,reauthorizationRequired:true,pendingScopes:next,provider:provider?.name||c.connector};
+    }
+    this.db.prepare('UPDATE connections SET scopes_json=?,updated_at=? WHERE id=?').run(json(next),now,id);
+    this.audit.append('local-admin',added.length&&removed.length?'connection.scopes_changed':added.length?'connection.scope_elevated':'connection.scope_downgraded',id,{previous,next,added,removed,reauthorizationRequired:false});
+    return {connection:this.getConnection(id),added,removed,reauthorizationRequired:false,provider:provider?.name||c.connector};
   }
   checkConnectionHealth(id) {
     const c=this.getConnection(id); if(!c) throw appError('Connection not found.',404);
