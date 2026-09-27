@@ -47,3 +47,10 @@ Use actor kind `control` for approval-channel bridges. A control token is intent
 ## Authenticated browser inspection
 
 OpenCLI inspection runs inside the user's authenticated browser session. Treat the browser profile as sensitive. PAG sanitizes returned media URLs into opaque encrypted handles, but page text and public/social metadata requested by the caller are returned to the permitted actor. Grant read-inspection capabilities only to agents that need them.
+
+
+## Account-scoped authorization (v1.1)
+
+Capabilities tied to a provider account require `connectionId`. PAG evaluates both the connection's logical provider scopes and the agent × connection access record. New pairs default to `none`. The authorization is checked when the intent is created and again immediately before execution, so a disconnect, account-scope downgrade, or agent-access downgrade prevents a stale approval from executing.
+
+Global grants remain available for non-account capabilities. They do not override an explicit connection access decision for an account-bound action.

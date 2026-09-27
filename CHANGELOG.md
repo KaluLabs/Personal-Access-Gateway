@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 — 2026-09-27
+
+- Added provider-aware Connections dashboard and provider catalog.
+- Added logical account scopes with elevation/downgrade audit events.
+- Added disconnect/reconnect lifecycle and configuration health state while preserving audit history.
+- Added deny-first agent × connection access matrix with No access, Read only, Ask, Automatic, and Custom levels.
+- Account-bound capabilities now require an explicit connection and are revalidated immediately before execution.
+- Added provider extension documentation and CLI/API operations for connections and access.
+- Added additive v1.0 → v1.1 database migration with safe default-No-Access initialization.
+
 ## 1.0.0 — 2026-09-26
 
 - Consolidated PAG's deny-first action gateway and Control Center into one local-first service.

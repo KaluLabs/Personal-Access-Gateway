@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Personal Access Gateway API
-  version: 1.0.0
+  version: 1.1.0
   description: Local-first capability gateway for agents, human approvals, and least-privilege control channels.
 servers:
   - url: http://127.0.0.1:8787
@@ -236,16 +236,21 @@ paths:
       responses: { '200': { description: Revocation result } }
   /v1/connectors:
     get:
-      summary: List registered capabilities/connectors
+      summary: List registered capability executors
       security: [{ adminCookie: [] }]
       responses: { '200': { description: Connectors } }
+  /v1/providers:
+    get:
+      summary: List provider manifests, account scopes, capabilities, and human-readable access levels
+      security: [{ adminCookie: [] }]
+      responses: { '200': { description: Provider catalog } }
   /v1/connections:
     get:
-      summary: List non-secret connection metadata
+      summary: List non-secret connected-account metadata
       security: [{ adminCookie: [] }]
       responses: { '200': { description: Connections } }
     post:
-      summary: Create connection metadata with optional vault reference
+      summary: Register a provider account with logical account scopes
       security: [{ adminCookie: [] }]
       parameters:
         - $ref: '#/components/parameters/Csrf'
@@ -258,14 +263,19 @@ paths:
               required: [name, connector]
               properties:
                 name: { type: string }
-                connector: { type: string }
+                connector: { type: string, examples: [x] }
                 accountLabel: { type: [string, 'null'] }
                 vaultRef: { type: [string, 'null'] }
+                authMethod: { type: [string, 'null'], examples: [browser] }
+                scopes:
+                  type: array
+                  items: { type: string }
+                externalAccountId: { type: [string, 'null'] }
                 metadata: { type: object, additionalProperties: true }
       responses: { '201': { description: Connection metadata } }
   /v1/connections/{id}/status:
     post:
-      summary: Enable or disable a connection
+      summary: Temporarily enable or disable a connection
       security: [{ adminCookie: [] }]
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -280,14 +290,122 @@ paths:
               properties:
                 status: { type: string, enum: [active, disabled] }
       responses: { '200': { description: Updated connection } }
+  /v1/connections/{id}/scopes:
+    post:
+      summary: Elevate or downgrade the account scopes PAG may use
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scopes]
+              properties:
+                scopes:
+                  type: array
+                  items: { type: string }
+      responses: { '200': { description: Scope change and reauthorization requirement } }
+  /v1/connections/{id}/health:
+    post:
+      summary: Refresh connection configuration health
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      responses: { '200': { description: Connection health } }
+  /v1/connections/{id}/disconnect:
+    post:
+      summary: Disconnect an account while preserving its audit history
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deleteCredential: { type: boolean, default: false }
+      responses: { '200': { description: Disconnected connection } }
+  /v1/connections/{id}/reconnect:
+    post:
+      summary: Reconnect an existing account record
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accountLabel: { type: [string, 'null'] }
+                vaultRef: { type: [string, 'null'] }
+                authMethod: { type: string }
+                scopes:
+                  type: array
+                  items: { type: string }
+      responses: { '200': { description: Reconnected connection } }
   /v1/connections/{id}:
     delete:
-      summary: Delete connection metadata
+      summary: Hard-delete connection metadata; prefer disconnect for normal user workflows
       security: [{ adminCookie: [] }]
       parameters:
         - $ref: '#/components/parameters/Id'
         - $ref: '#/components/parameters/Csrf'
       responses: { '200': { description: Deletion result } }
+  /v1/access-matrix:
+    get:
+      summary: List every agent-account access assignment for the dashboard matrix
+      security: [{ adminCookie: [] }]
+      responses: { '200': { description: Access matrix } }
+  /v1/access:
+    get:
+      summary: List connection access records
+      security: [{ adminCookie: [] }]
+      parameters:
+        - in: query
+          name: actorId
+          schema: { type: string }
+        - in: query
+          name: connectionId
+          schema: { type: string }
+      responses: { '200': { description: Connection access records } }
+  /v1/access/{connectionId}/{actorId}:
+    put:
+      summary: Elevate or downgrade one agent's access to one account
+      security: [{ adminCookie: [] }]
+      parameters:
+        - in: path
+          name: connectionId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: actorId
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [level]
+              properties:
+                level: { type: string, enum: [none, read, ask, automatic, custom] }
+                capabilities:
+                  type: object
+                  additionalProperties:
+                    type: string
+                    enum: [allow, ask, deny]
+      responses: { '200': { description: Updated access assignment } }
   /v1/approvals:
     get:
       summary: List approvals

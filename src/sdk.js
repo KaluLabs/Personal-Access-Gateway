@@ -10,5 +10,9 @@ export class PagClient {
   createIntent(capability,args={}, { idempotencyKey }={}) {
     return this.request('/v1/intents',{method:'POST',headers:idempotencyKey?{'x-pag-idempotency-key':idempotencyKey}:{},body:JSON.stringify({capability,args})});
   }
+  createIntentForConnection(capability, connectionId, args={}, options={}) {
+    if (!connectionId) throw new Error('connectionId is required.');
+    return this.createIntent(capability,{...args,connectionId},options);
+  }
   getIntent(id) { return this.request(`/v1/intents/${encodeURIComponent(id)}`); }
 }
