@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0 — 2026-09-27
+
+- Added generic OAuth 2.0 authorization-code authentication with state + S256 PKCE.
+- Added encrypted transient PKCE verifier storage and single-use OAuth flow state.
+- Added encrypted access/refresh-token storage and in-gateway token refresh.
+- Added GitHub OAuth identity connections and `github.user.read`.
+- Added Google OAuth/OIDC identity connections and `google.user.read`.
+- Added OAuth account reauthorization without replacing connection identity or access assignments.
+- OAuth scope elevation is fail-closed until provider reauthorization completes; downgrades take effect locally immediately.
+- Added Control Center OAuth connect/reconnect flows and provider configuration status.
+- Added OAuth deployment, security, and v1.1 → v1.2 migration documentation.
+
 ## 1.1.0 — 2026-09-27
 
 - Added provider-aware Connections dashboard and provider catalog.
