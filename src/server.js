@@ -27,12 +27,12 @@ export function createServer(service,{dir,publicDir=fileURLToPath(new URL('../pu
     res.setHeader('content-security-policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     const url=new URL(req.url,'http://localhost'); const p=url.pathname;
     try {
-      if(req.method==='GET' && p==='/health') return sendJson(res,200,{ok:true,service:'personal-access-gateway',version:'1.0.0'});
+      if(req.method==='GET' && p==='/health') return sendJson(res,200,{ok:true,service:'personal-access-gateway',version:'1.1.0'});
       if(req.method==='POST' && p==='/auth/login') { const b=await bodyJson(req); if(!safeEqual(b.token||'',adm))return sendJson(res,401,{error:'Invalid admin token.'}); return sendJson(res,200,{ok:true},{'set-cookie':`pag_session=${encodeURIComponent(session)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`}); }
       if(req.method==='POST' && p==='/auth/logout') return sendJson(res,200,{ok:true},{'set-cookie':'pag_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'});
       if(req.method==='GET' && p==='/auth/me') return sendJson(res,200,{authenticated:!!isAdmin(req)});
 
-      if(p.startsWith('/v1/admin/') || p.startsWith('/v1/approvals') || p.startsWith('/v1/actors') || p.startsWith('/v1/grants') || p.startsWith('/v1/vault') || p.startsWith('/v1/audit') || p.startsWith('/v1/connectors') || p.startsWith('/v1/connections')) { requireAdmin(req); requireCsrf(req); }
+      if(p.startsWith('/v1/admin/') || p.startsWith('/v1/approvals') || p.startsWith('/v1/actors') || p.startsWith('/v1/grants') || p.startsWith('/v1/vault') || p.startsWith('/v1/audit') || p.startsWith('/v1/connectors') || p.startsWith('/v1/providers') || p.startsWith('/v1/connections') || p.startsWith('/v1/access')) { requireAdmin(req); requireCsrf(req); }
 
       if(req.method==='GET' && p==='/v1/control/approvals') { const actor=controlActor(req); if(!actor)return sendJson(res,401,{error:'Valid control bearer token required.'}); return sendJson(res,200,{approvals:service.listApprovals(url.searchParams.get('state')||'pending',Number(url.searchParams.get('limit')||100))}); }
       if(req.method==='POST' && /^\/v1\/control\/approvals\/[^/]+\/approve$/.test(p)) { const actor=controlActor(req); if(!actor)return sendJson(res,401,{error:'Valid control bearer token required.'}); const b=await bodyJson(req); const id=p.split('/')[4]; return sendJson(res,200,await service.approve(id,{decidedBy:`control:${actor.id}`,note:b.note||null,expectedArgsHash:b.expectedArgsHash||null})); }
@@ -48,10 +48,18 @@ export function createServer(service,{dir,publicDir=fileURLToPath(new URL('../pu
       if(req.method==='POST' && p==='/v1/grants') { const b=await bodyJson(req); return sendJson(res,201,service.createGrant({actorId:b.actorId,capability:b.capability,effect:b.effect,priority:b.priority,conditions:b.conditions||{},expiresAt:b.expiresAt||null})); }
       if(req.method==='DELETE' && p.startsWith('/v1/grants/')) return sendJson(res,200,{deleted:service.revokeGrant(p.split('/').pop())});
       if(req.method==='GET' && p==='/v1/connectors') return sendJson(res,200,{connectors:service.connectors.list()});
+      if(req.method==='GET' && p==='/v1/providers') return sendJson(res,200,service.listProviders());
       if(req.method==='GET' && p==='/v1/connections') return sendJson(res,200,{connections:service.listConnections()});
-      if(req.method==='POST' && p==='/v1/connections') { const b=await bodyJson(req); return sendJson(res,201,service.createConnection({name:b.name,connector:b.connector,accountLabel:b.accountLabel||null,vaultRef:b.vaultRef||null,metadata:b.metadata||{}})); }
+      if(req.method==='POST' && p==='/v1/connections') { const b=await bodyJson(req); return sendJson(res,201,service.createConnection({name:b.name,connector:b.connector,accountLabel:b.accountLabel||null,vaultRef:b.vaultRef||null,metadata:b.metadata||{},authMethod:b.authMethod||null,scopes:b.scopes??null,externalAccountId:b.externalAccountId||null})); }
       if(req.method==='POST' && /^\/v1\/connections\/[^/]+\/status$/.test(p)) { const b=await bodyJson(req); return sendJson(res,200,service.setConnectionStatus(p.split('/')[3],b.status)); }
+      if(req.method==='POST' && /^\/v1\/connections\/[^/]+\/scopes$/.test(p)) { const b=await bodyJson(req); return sendJson(res,200,service.setConnectionScopes(p.split('/')[3],b.scopes||[])); }
+      if(req.method==='POST' && /^\/v1\/connections\/[^/]+\/health$/.test(p)) return sendJson(res,200,service.checkConnectionHealth(p.split('/')[3]));
+      if(req.method==='POST' && /^\/v1\/connections\/[^/]+\/disconnect$/.test(p)) { const b=await bodyJson(req); return sendJson(res,200,service.disconnectConnection(p.split('/')[3],{deleteCredential:!!b.deleteCredential})); }
+      if(req.method==='POST' && /^\/v1\/connections\/[^/]+\/reconnect$/.test(p)) { const b=await bodyJson(req); return sendJson(res,200,service.reconnectConnection(p.split('/')[3],b||{})); }
       if(req.method==='DELETE' && /^\/v1\/connections\/[^/]+$/.test(p)) return sendJson(res,200,{deleted:service.deleteConnection(p.split('/')[3])});
+      if(req.method==='GET' && p==='/v1/access-matrix') return sendJson(res,200,service.accessMatrix());
+      if(req.method==='GET' && p==='/v1/access') return sendJson(res,200,{access:service.listConnectionAccess({actorId:url.searchParams.get('actorId'),connectionId:url.searchParams.get('connectionId')})});
+      if(req.method==='PUT' && /^\/v1\/access\/[^/]+\/[^/]+$/.test(p)) { const b=await bodyJson(req); const parts=p.split('/'); return sendJson(res,200,service.setConnectionAccess({connectionId:parts[3],actorId:parts[4],level:b.level,capabilities:b.capabilities||{}})); }
       if(req.method==='GET' && p==='/v1/vault') return sendJson(res,200,{entries:service.vault.list()});
       if(req.method==='POST' && p==='/v1/vault') { const b=await bodyJson(req); const meta=service.vault.put(b.name,b.value,{connector:b.connector||null,metadata:b.metadata||{}}); return sendJson(res,201,meta); }
       if(req.method==='DELETE' && p.startsWith('/v1/vault/')) return sendJson(res,200,{deleted:service.vault.delete(decodeURIComponent(p.slice('/v1/vault/'.length)))});

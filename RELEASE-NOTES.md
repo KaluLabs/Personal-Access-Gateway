@@ -1,26 +1,34 @@
-# PAG v1.0.0 release verification
+# PAG v1.1.0 release notes
 
-Release date: 2026-09-26
+PAG v1.1 turns the v1 security core into an account-access control product.
 
-## Verified in this build environment
+## Connections
 
-- Node.js v22.16.0.
-- JavaScript syntax check across `src/`, `bin/`, `public/`, `examples/`, and `tests/`.
-- OpenAPI 3.1 YAML parses successfully and documents 27 paths.
-- `npm test`: 13 tests passed, 0 failed.
-- Fresh-data smoke test passed for:
-  - initialization and secret generation;
-  - actor + `ask` grant creation;
-  - intent submission and pending approval;
-  - exact-hash approval and one successful execution receipt;
-  - audit-chain verification;
-  - HTTP health endpoint;
-  - Control Center HTML;
-  - administrator login and summary API.
+- Provider catalog for X, LinkedIn, and Instagram.
+- Browser-backed account registration with logical account scopes.
+- Connection cards with lifecycle, configuration health, account scopes, and agent usage count.
+- Disable/enable, disconnect/reconnect, and scope elevation/downgrade.
+- Disconnect preserves audit history and can optionally remove an unshared vault credential.
 
-## Environment-dependent verification still required on the target machine
+## Access management
 
-- OpenCLI is not installed in this build container. Instagram/X authenticated-browser inspection is covered by routing/media-registry tests, but the live browser fetch must be exercised on the machine that has the authenticated OpenCLI extension/profile.
-- Docker is not installed in this build container, so the included Dockerfile was not image-built here.
+- New agent × account access matrix.
+- Levels: No access, Read only, Ask before actions, Automatic, and Custom.
+- Every new or migrated agent/account pair defaults to No access.
+- Account-bound capabilities require an explicit `connectionId`.
+- Provider type and account scope are enforced before authorization.
+- Access is revalidated immediately before execution so stale approvals cannot survive a downgrade or disconnect.
 
-These two items do not affect the tested authorization, approval, execution, vault, audit, Control Center, SDK, or Control Line paths.
+## Open source extension surface
+
+- Added provider manifests separate from connector executors.
+- Added `docs/PROVIDERS.md` with the provider/executor contract and OAuth adapter expectations.
+- Added CLI and HTTP APIs for connection lifecycle, scopes, provider discovery, and access management.
+
+## Upgrade
+
+The SQLite migration from v1.0 is additive. Existing agent × connection pairs are initialized to No access as a deliberate fail-closed migration. See `docs/MIGRATION-v1.0.0.md`.
+
+## Verification
+
+The v1.1 regression suite covers the v1 security invariants plus account access defaults, access-level behavior, scope downgrade, disconnect/reconnect, stale-approval invalidation, dashboard APIs, and additive database migration.

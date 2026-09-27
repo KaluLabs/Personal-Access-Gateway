@@ -9,17 +9,26 @@ const argv=process.argv.slice(2); const cmd=argv[0];
 function flag(name, fallback=null){const i=argv.indexOf(`--${name}`);return i>=0?(argv[i+1]??true):fallback}
 function need(name){const v=flag(name);if(v===null||v===true)throw new Error(`Missing --${name}`);return v}
 function out(v){console.log(typeof v==='string'?v:JSON.stringify(v,null,2))}
-function help(){out(`Personal Access Gateway v1.0.0
+function help(){out(`Personal Access Gateway v1.1.0
 
 Usage:
   pag init [--force]
   pag serve [--host 127.0.0.1] [--port 8787]
   pag doctor
   pag capabilities
+  pag providers
   pag inspect <https://instagram.com/...|https://x.com/...>
   pag media fetch --handle pagm_... [--out ./file]
   pag actor create --name BIPAI [--kind agent]
   pag actor list
+  pag connection create --name "Personal X" --provider x --account @me [--scopes read,publish] [--vault x.session]
+  pag connection list
+  pag connection health --id CONNECTION_ID
+  pag connection scopes --id CONNECTION_ID --scopes read,publish
+  pag connection disconnect --id CONNECTION_ID [--delete-credential]
+  pag connection reconnect --id CONNECTION_ID [--vault x.session] [--account @me] [--scopes read,publish]
+  pag access matrix
+  pag access set --connection CONNECTION_ID --actor ACTOR_ID --level none|read|ask|automatic|custom [--capabilities '{"x.threads.create":"ask"}']
   pag grant add --actor ACTOR_ID --capability x.threads.create --effect ask [--priority 10] [--conditions '{"maxLength":{"text":280}}']
   pag grant list [--actor ACTOR_ID]
   pag grant revoke --id GRANT_ID
@@ -50,10 +59,19 @@ try{
     let opencli; try{opencli=s.inspector.doctor();}catch(e){opencli={available:false,error:e.message};}
     out({ok:true,node:process.version,dataDir:dataDir(),summary:s.summary(),adminTokenPresent:!!adminToken(dataDir()),opencli});
   } else if(cmd==='capabilities') out(s.connectors.list());
+  else if(cmd==='providers') out(s.listProviders());
   else if(cmd==='inspect') { const url=argv[1]; if(!url)throw new Error('Usage: pag inspect <url>'); out(await s.inspector.inspect(url)); }
   else if(cmd==='media'&&argv[1]==='fetch') out(await s.media.fetch(need('handle'),flag('out')));
   else if(cmd==='actor'&&argv[1]==='create') out(s.createActor(need('name'),flag('kind','agent')));
   else if(cmd==='actor'&&argv[1]==='list') out(s.listActors());
+  else if(cmd==='connection'&&argv[1]==='create') out(s.createConnection({name:need('name'),connector:need('provider'),accountLabel:flag('account'),vaultRef:flag('vault'),authMethod:flag('auth'),scopes:flag('scopes')?String(flag('scopes')).split(',').map(x=>x.trim()).filter(Boolean):null}));
+  else if(cmd==='connection'&&argv[1]==='list') out(s.listConnections());
+  else if(cmd==='connection'&&argv[1]==='health') out(s.checkConnectionHealth(need('id')));
+  else if(cmd==='connection'&&argv[1]==='scopes') out(s.setConnectionScopes(need('id'),String(need('scopes')).split(',').map(x=>x.trim()).filter(Boolean)));
+  else if(cmd==='connection'&&argv[1]==='disconnect') out(s.disconnectConnection(need('id'),{deleteCredential:argv.includes('--delete-credential')}));
+  else if(cmd==='connection'&&argv[1]==='reconnect') out(s.reconnectConnection(need('id'),{vaultRef:flag('vault')===null?undefined:flag('vault'),accountLabel:flag('account')===null?undefined:flag('account'),authMethod:flag('auth')===null?undefined:flag('auth'),scopes:flag('scopes')===null?undefined:String(flag('scopes')).split(',').map(x=>x.trim()).filter(Boolean)}));
+  else if(cmd==='access'&&argv[1]==='matrix') out(s.accessMatrix());
+  else if(cmd==='access'&&argv[1]==='set') out(s.setConnectionAccess({connectionId:need('connection'),actorId:need('actor'),level:need('level'),capabilities:JSON.parse(flag('capabilities','{}'))}));
   else if(cmd==='grant'&&argv[1]==='add') out(s.createGrant({actorId:need('actor'),capability:need('capability'),effect:need('effect'),priority:Number(flag('priority',0)),conditions:JSON.parse(flag('conditions','{}')),expiresAt:flag('expires')}));
   else if(cmd==='grant'&&argv[1]==='list') out(s.listGrants(flag('actor')));
   else if(cmd==='grant'&&argv[1]==='revoke') out({revoked:s.revokeGrant(need('id'))});

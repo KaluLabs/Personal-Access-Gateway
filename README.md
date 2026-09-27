@@ -1,8 +1,8 @@
-# Personal Access Gateway (PAG) v1.0.0
+# Personal Access Gateway (PAG) v1.1.0
 
 PAG is a local-first authorization boundary between AI agents and real-world account actions. Agents never receive account credentials. They submit **intents** describing the exact capability and arguments they want to use. PAG evaluates a deny-first policy, optionally asks the human for approval, binds that approval to the payload hash, and produces at most one execution receipt.
 
-This repository is the complete v1 baseline for the earlier PAG v0.3.x work.
+This repository is the open-source PAG baseline: a local-first security boundary plus a Control Center for connected accounts, agent access, approvals, and audit history.
 
 ## What is included
 
@@ -14,6 +14,9 @@ This repository is the complete v1 baseline for the earlier PAG v0.3.x work.
 - Idempotent intent submission and exactly-once execution receipts.
 - Tamper-evident append-only audit hash chain.
 - AES-256-GCM encrypted local credential vault. Raw values are never returned by HTTP APIs.
+- Provider-aware account connections with scopes, health state, disconnect/reconnect, and preserved audit history.
+- Agent × account access matrix with No access, Read only, Ask, Automatic, and Custom permission levels.
+- Execution-time access revalidation so disconnects and permission downgrades invalidate stale approvals.
 - Browser Control Center for approvals, actors, grants, connections, intents, handoffs, lockdown, vault metadata, and audit verification.
 - Authenticated-browser read inspection for Instagram and X through OpenCLI, preserving the original `pag inspect <url>` workflow.
 - Encrypted opaque `pagm_...` media handles plus `pag media fetch`.
@@ -32,7 +35,7 @@ PAG deliberately does **not** silently publish to X or LinkedIn. Successful exec
 ## First run
 
 ```bash
-cd pag-v1.0.0
+cd Personal-Access-Gateway
 export PAG_DATA_DIR="$PWD/.pag"     # PowerShell: $env:PAG_DATA_DIR="$PWD/.pag"
 node ./bin/pag.js init
 node ./bin/pag.js serve
@@ -48,9 +51,25 @@ The generated files are permission-restricted where the host OS supports POSIX f
 
 Open `http://127.0.0.1:8787` and enter the admin token.
 
+## Connections and account access
+
+The Control Center is the primary PAG product surface. **Connections** shows each provider account, its account-level scopes, lifecycle, and health metadata. **Access** is the agent × account permission matrix. New pairs start at **No access** even if an older global grant exists.
+
+Current human-readable levels are:
+
+- **No access** — deny the account to that agent.
+- **Read only** — allow provider capabilities marked read; deny writes.
+- **Ask before actions** — reads may run automatically, writes require exact-payload approval.
+- **Automatic** — allow capabilities covered by the account scopes without per-action approval.
+- **Custom** — set allow/ask/deny for individual capabilities.
+
+Account scopes and agent access are independent. For example, PAG may hold an X connection with `read + publish`, while a research agent has only `Read only` and BIPAI has `Ask before actions`. Removing the connection's `publish` scope blocks publishing for every agent, including agents set to Automatic.
+
+Disconnecting an account disables future use without deleting its audit history. Reconnect reuses the connection identity. See `docs/PROVIDERS.md` for the open-source provider/executor extension contract.
+
 ## Create an agent and approval policy
 
-From the Control Center, create an actor such as `BIPAI`, copy its token once, and add an `ask` grant for `x.threads.create` and/or `linkedin.posts.create`.
+From the Control Center, create an actor such as `BIPAI`, copy its token once, connect an account, then assign BIPAI an account access level from the **Access** page. Global grants remain available for capabilities that are not tied to a connection.
 
 Equivalent CLI:
 
@@ -58,14 +77,11 @@ Equivalent CLI:
 node ./bin/pag.js actor create --name BIPAI
 # copy actor.id and token from output
 
-node ./bin/pag.js grant add \
-  --actor ACTOR_ID \
-  --capability x.threads.create \
-  --effect ask \
-  --priority 10
+node ./bin/pag.js connection create --name "Personal X" --provider x --account @me --scopes read,publish
+node ./bin/pag.js access set --connection CONNECTION_ID --actor ACTOR_ID --level ask
 ```
 
-Default behavior is **deny** when no matching grant exists.
+Default behavior remains **deny**. Account-bound capabilities additionally require an explicit connection and an agent × account access assignment.
 
 ## Submit an agent intent
 
@@ -77,12 +93,13 @@ curl -X POST http://127.0.0.1:8787/v1/intents \
   -d '{
     "capability": "x.threads.create",
     "args": {
-      "posts": ["First approved post", "Second approved post"]
+      "posts": ["First approved post", "Second approved post"],
+      "connectionId": "CONNECTION_ID"
     }
   }'
 ```
 
-With an `ask` grant, the response has `status: "pending_approval"`. The Control Center displays the exact arguments and their hash. Approving them causes the connector to execute once and produces browser handoff URL(s).
+With account access set to `ask`, the response has `status: "pending_approval"`. The Control Center displays the exact arguments and their hash. Approving them causes the connector to execute once and produces browser handoff URL(s).
 
 ## Authenticated read inspection
 
@@ -103,7 +120,7 @@ Agents can request the same read operations through `instagram.media.inspect` or
 
 ## Connections
 
-A connection is non-secret account metadata plus an optional reference to a vault entry. For example, `Personal X` can reference vault item `x.session` without returning that secret to an agent. Write connectors enforce connection type when an intent includes `connectionId`.
+A connection is non-secret account metadata plus an optional reference to a vault entry. It now also records authentication method, logical account scopes, lifecycle, and health metadata. Account-bound agent intents **must** include `connectionId`; PAG checks provider type, account scope, and the agent-specific connection access before execution. The same authorization is revalidated immediately before execution.
 
 ## Emergency lockdown
 
@@ -127,8 +144,9 @@ Approval still requires the exact `expectedArgsHash`. `examples/whatsapp-control
 import { PagClient } from './src/sdk.js';
 
 const pag = new PagClient({ token: process.env.PAG_ACTOR_TOKEN });
-const intent = await pag.createIntent(
+const intent = await pag.createIntentForConnection(
   'linkedin.posts.create',
+  process.env.PAG_LINKEDIN_CONNECTION_ID,
   { text: 'Approved LinkedIn update' },
   { idempotencyKey: 'content-sha-or-event-id' }
 );
@@ -143,9 +161,12 @@ pag init
 pag serve
 pag doctor
 pag capabilities
+pag providers
 pag inspect <url>
 pag media fetch --handle pagm_...
 pag actor create|list
+pag connection create|list|health|scopes|disconnect|reconnect
+pag access matrix|set
 pag grant add|list|revoke
 pag intent submit|get
 pag approvals list|approve|deny
@@ -209,11 +230,11 @@ The Control Center can accept a new vault value because it is the human administ
 ## Docker
 
 ```bash
-docker build -t pag:1.0.0 .
+docker build -t pag:1.1.0 .
 docker run --rm -it \
   -p 127.0.0.1:8787:8787 \
   -v pag-data:/data \
-  pag:1.0.0
+  pag:1.1.0
 ```
 
 The entrypoint initializes `/data` on first run, then starts PAG. Preserve the volume.
@@ -224,7 +245,7 @@ The entrypoint initializes `/data` on first run, then starts PAG. Preserve the v
 npm test
 ```
 
-The suite covers default deny, exact approval binding, idempotency-key rebinding, deny precedence, vault plaintext leakage, audit-chain verification, and an end-to-end HTTP X handoff.
+The suite covers the v1 security invariants plus account-access defaults, read/ask/automatic/custom levels, scope downgrades, disconnect/reconnect, stale-approval invalidation, dashboard APIs, and additive database migration.
 
 ## API contract
 
@@ -241,3 +262,7 @@ Read `docs/ARCHITECTURE.md` for trust boundaries and lifecycle details.
 ## Migrating from PAG v0.3.1
 
 The previous local implementation used an earlier schema. Because this repository does not have the exact v0.3.1 database DDL, v1 does not attempt a destructive automatic migration. Keep the old database untouched, initialize a new v1 data directory, recreate actors/grants, and import only data whose old columns are verified. See `docs/MIGRATION-v0.3.1.md`.
+
+## Upgrading from v1.0.0
+
+See `docs/MIGRATION-v1.0.0.md`. The migration is additive, but existing agent × connection pairs intentionally start at **No access** and must be explicitly re-enabled.

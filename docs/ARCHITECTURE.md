@@ -102,3 +102,30 @@ A `control` actor is separate from an ordinary agent. Its token is accepted only
 ## Lockdown
 
 Lockdown is stored as durable gateway state. When enabled, intent creation records a deny decision before evaluating actor grants. This provides one switch for stopping new agent actions without deleting actors or policies.
+
+
+## v1.1 connection authorization layer
+
+For provider-account capabilities, PAG inserts an account boundary between actor authentication and the generic grant engine:
+
+```text
+Actor token
+   |
+   v
+connectionId required
+   |
+   +--> provider type check
+   +--> account scope check
+   +--> agent x connection access (none/read/ask/automatic/custom)
+   |
+   v
+intent / exact-payload approval
+   |
+   v
+execution-time revalidation
+   |
+   v
+connector executor
+```
+
+The `connection_access` table is authoritative for account-bound actions. The provider manifest maps human-readable scopes and access levels to capability modes, while `ConnectorRegistry` owns execution. This keeps the UI understandable and the runtime deny-first.

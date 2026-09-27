@@ -1,6 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import { ensureDataDir, runtimeConfig } from './config.js';
 
+function ensureColumn(db, table, name, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map(r=>r.name);
+  if (!columns.includes(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+}
+
 export function openDb(dir) {
   const cfg = runtimeConfig(ensureDataDir(dir));
   const db = new DatabaseSync(cfg.dbPath);
@@ -89,6 +94,18 @@ export function openDb(dir) {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS connection_access (
+      actor_id TEXT NOT NULL,
+      connection_id TEXT NOT NULL,
+      level TEXT NOT NULL CHECK(level IN ('none','read','ask','automatic','custom')),
+      capabilities_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(actor_id, connection_id),
+      FOREIGN KEY(actor_id) REFERENCES actors(id) ON DELETE CASCADE,
+      FOREIGN KEY(connection_id) REFERENCES connections(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS connection_access_connection ON connection_access(connection_id, actor_id);
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value_json TEXT NOT NULL,
@@ -113,6 +130,18 @@ export function openDb(dir) {
       prev_hash TEXT,
       event_hash TEXT NOT NULL UNIQUE
     );
+  `);
+  ensureColumn(db, 'connections', 'auth_method', "TEXT NOT NULL DEFAULT 'manual'");
+  ensureColumn(db, 'connections', 'scopes_json', "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, 'connections', 'external_account_id', 'TEXT');
+  ensureColumn(db, 'connections', 'health_status', "TEXT NOT NULL DEFAULT 'unknown'");
+  ensureColumn(db, 'connections', 'last_checked_at', 'TEXT');
+  ensureColumn(db, 'connections', 'disconnected_at', 'TEXT');
+  db.exec(`
+    INSERT OR IGNORE INTO connection_access(actor_id,connection_id,level,capabilities_json,created_at,updated_at)
+    SELECT a.id,c.id,'none','{}',datetime('now'),datetime('now')
+    FROM actors a CROSS JOIN connections c
+    WHERE a.kind='agent';
   `);
   return db;
 }
