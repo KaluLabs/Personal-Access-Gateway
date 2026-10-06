@@ -109,6 +109,12 @@ node ./bin/pag.js access set --connection CONNECTION_ID --actor ACTOR_ID --level
 
 Default behavior remains **deny**. Account-bound capabilities additionally require an explicit connection and an agent × account access assignment.
 
+## Agent Dock authorization receipts
+
+PAG exposes `agent-dock.direct-action.authorize` as a deliberately side-effect-free connector for Agent Dock host actions that need PAG policy before local execution. The intent arguments contain the exact Direct Action invocation envelope (actor/source/capability/risk/arguments), so PAG's normal `{ actorId, capability, args }` hash binds the reviewed local action. A successful PAG execution returns an authorization receipt; Agent Dock must still re-read and verify that exact intent before performing the local action.
+
+This capability is deny-first like every other PAG capability. Give the Agent Dock PAG actor an `ask` or `allow` grant explicitly; do not use `*` merely to enable Direct Actions.
+
 ## Submit an agent intent
 
 ```bash
