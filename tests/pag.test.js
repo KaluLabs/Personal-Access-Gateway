@@ -17,6 +17,57 @@ test('default deny blocks ungranted capabilities',async()=>{const f=fixture();tr
 
 test('ask grant binds approval to exact payload and executes once',async()=>{const f=fixture();try{const {actor}=f.service.createActor('agent');f.service.createGrant({actorId:actor.id,capability:'noop.test',effect:'ask'});const intent=await f.service.createIntent({actorId:actor.id,capability:'noop.test',args:{a:1},idempotencyKey:'k1'});assert.equal(intent.status,'pending_approval');assert.ok(intent.approval);await assert.rejects(()=>f.service.approve(intent.approval.id,{expectedArgsHash:'wrong'}),/hash mismatch/i);const done=await f.service.approve(intent.approval.id,{expectedArgsHash:intent.args_hash});assert.equal(done.status,'succeeded');assert.equal(done.execution.result.echo.a,1);const again=await f.service.approve(intent.approval.id,{expectedArgsHash:intent.args_hash});assert.equal(again.execution.id,done.execution.id);const count=f.db.prepare('SELECT COUNT(*) n FROM executions').get().n;assert.equal(Number(count),1)}finally{f.cleanup()}});
 
+
+test('Agent Dock direct-action authorization is exact-payload gated and side-effect free',async()=>{const f=fixture();try{
+  const {actor}=f.service.createActor('agent-dock');
+  f.service.createGrant({actorId:actor.id,capability:'agent-dock.direct-action.authorize',effect:'ask'});
+  const args={
+    schemaVersion:1,
+    invocationId:'inv_123',
+    source:'agent',
+    actorId:'researcher',
+    taskId:'task_1',
+    workspaceId:'workspace_1',
+    directCapability:'file.move',
+    directRisk:'A1',
+    directArgs:{attachmentId:'att_1',destination:'downloads'},
+    createdAt:123456
+  };
+  const pending=await f.service.createIntent({
+    actorId:actor.id,
+    capability:'agent-dock.direct-action.authorize',
+    args,
+    idempotencyKey:'agent-dock:inv_123'
+  });
+  assert.equal(pending.status,'pending_approval');
+  assert.equal(pending.execution,null);
+  await assert.rejects(()=>f.service.approve(pending.approval.id,{expectedArgsHash:'wrong'}),/hash mismatch/i);
+  const done=await f.service.approve(pending.approval.id,{expectedArgsHash:pending.args_hash});
+  assert.equal(done.status,'succeeded');
+  assert.equal(done.execution.result.authorized,true);
+  assert.equal(done.execution.result.mode,'authorization_receipt');
+  assert.equal(done.execution.result.invocationId,'inv_123');
+  assert.equal(done.execution.result.directCapability,'file.move');
+  assert.deepEqual(done.execution.result.directArgs,args.directArgs);
+  const again=await f.service.approve(pending.approval.id,{expectedArgsHash:pending.args_hash});
+  assert.equal(again.execution.id,done.execution.id);
+}finally{f.cleanup()}});
+
+test('Agent Dock authorization connector rejects malformed or extended envelopes',async()=>{const f=fixture();try{
+  const {actor}=f.service.createActor('agent-dock');
+  f.service.createGrant({actorId:actor.id,capability:'agent-dock.direct-action.authorize',effect:'allow'});
+  await assert.rejects(
+    ()=>f.service.createIntent({
+      actorId:actor.id,
+      capability:'agent-dock.direct-action.authorize',
+      args:{schemaVersion:1,invocationId:'x',source:'agent',actorId:'a',directCapability:'file.move',directRisk:'A1',directArgs:{},createdAt:1,shell:'whoami'}
+    }),
+    /Unsupported authorization field/
+  );
+  const failed=f.service.listIntents(1)[0];
+  assert.equal(failed.status,'failed');
+}finally{f.cleanup()}});
+
 test('idempotency keys cannot be rebound to different payloads',async()=>{const f=fixture();try{const {actor}=f.service.createActor('agent');f.service.createGrant({actorId:actor.id,capability:'noop.test',effect:'allow'});const a=await f.service.createIntent({actorId:actor.id,capability:'noop.test',args:{a:1},idempotencyKey:'same'});const b=await f.service.createIntent({actorId:actor.id,capability:'noop.test',args:{a:1},idempotencyKey:'same'});assert.equal(a.id,b.id);await assert.rejects(()=>f.service.createIntent({actorId:actor.id,capability:'noop.test',args:{a:2},idempotencyKey:'same'}),/different arguments/i)}finally{f.cleanup()}});
 
 test('deny at the highest matching priority wins over allow',async()=>{const f=fixture();try{const {actor}=f.service.createActor('agent');f.service.createGrant({actorId:actor.id,capability:'noop.*',effect:'allow',priority:10});f.service.createGrant({actorId:actor.id,capability:'noop.test',effect:'deny',priority:10});const i=await f.service.createIntent({actorId:actor.id,capability:'noop.test',args:{}});assert.equal(i.status,'denied')}finally{f.cleanup()}});
